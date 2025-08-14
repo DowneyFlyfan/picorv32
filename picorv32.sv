@@ -2427,10 +2427,10 @@ module picorv32_pcpi_div (
 
 		if (resetn && pcpi_valid && !pcpi_ready && pcpi_insn[6:0] == 7'b0110011 && pcpi_insn[31:25] == 7'b0000001) begin
 			case (pcpi_insn[14:12])
-				3'b100: instr_div <= 1;  
-				3'b101: instr_divu <= 1; 
-				3'b110: instr_rem <= 1;  
-				3'b111: instr_remu <= 1; 
+				3'b100: instr_div <= 1;
+				3'b101: instr_divu <= 1;
+				3'b110: instr_rem <= 1;
+				3'b111: instr_remu <= 1;
 			endcase
 		end
 
@@ -2455,11 +2455,13 @@ module picorv32_pcpi_div (
 		end else
 		if (start) begin
 			running <= 1;
-
-			dividend <= (instr_div || instr_rem) && pcpi_rs1[31] ? -pcpi_rs1 : pcpi_rs1; // 判断符号位 -> 加符号
+            
+            // 判断是有符号还是无符号除法 -> 判断符号位 -> 赋值正负
+			dividend <= (instr_div || instr_rem) && pcpi_rs1[31] ? -pcpi_rs1 : pcpi_rs1; 
 			divisor <= ((instr_div || instr_rem) && pcpi_rs2[31] ? -pcpi_rs2 : pcpi_rs2) << 31;
-			
-			outsign <= (instr_div && (pcpi_rs1[31] != pcpi_rs2[31]) && |pcpi_rs2) || (instr_rem && pcpi_rs1[31]); // 中间有判断除数是否为0的逻辑
+
+            // 除法->符号不同输出为负->分母不为0; 取余->输出和被除数同符号
+			outsign <= (instr_div && (pcpi_rs1[31] != pcpi_rs2[31]) && |pcpi_rs2) || (instr_rem && pcpi_rs1[31]);
 			
 			quotient <= 0;
 			quotient_msk <= 1 << 31;
