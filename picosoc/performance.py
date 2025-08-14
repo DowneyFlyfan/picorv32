@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -147,9 +145,16 @@ plt.title("Performance comparison for different PicoSoC SPI flash configurations
 plt.plot(range(len(labels)), values)
 plt.xticks(range(len(labels)), labels, rotation=80)
 
-for color, x1, x2 in [["black", 0, 0], ["red", 1, 8], ["green", 9, 16],
-        ["red", 17, 24], ["green", 25, 32], ["red", 33, 40], ["green", 41, 48]]:
-    for t in plt.axes().xaxis.get_ticklabels()[x1:x2+1]:
+for color, x1, x2 in [
+    ["black", 0, 0],
+    ["red", 1, 8],
+    ["green", 9, 16],
+    ["red", 17, 24],
+    ["green", 25, 32],
+    ["red", 33, 40],
+    ["green", 41, 48],
+]:
+    for t in plt.axes().xaxis.get_ticklabels()[x1 : x2 + 1]:
         t.set_color(color)
     plt.plot([x1, x1], [0, values[x1] - 0.2], color=color)
     plt.plot([x2, x2], [0, values[x2] - 0.2], color=color)

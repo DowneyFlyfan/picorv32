@@ -92,7 +92,7 @@ module picorv32 #(
 	output reg [31:0] eoi,
 
 `ifdef RISCV_FORMAL
-	output reg        rvfi_valid,
+	output reg        rvfi_valid, // RISC-V Formal Interface
 	output reg [63:0] rvfi_order,   // 指令的序列号
 	output reg [31:0] rvfi_insn,    // 当前执行的指令
 	output reg        rvfi_trap,    // 指示是否发生陷阱（异常或中断）
@@ -147,7 +147,7 @@ module picorv32 #(
 	// 允许同时指示多个事件属性 (例如，一个分支事件可能同时伴随中断)。
 	// 此外，使用4位也为未来可能添加的更多跟踪事件类型预留了空间。
 
-	reg [63:0] count_cycle, count_instr;
+	reg [63:0] count_cycle, count_instr; // count_cycle: 这是一个64位计数器，每个时钟周期递增。它用于实现RISC-V的mcycle CSR（Control and Status Register），允许CPU读取自复位以来经过的时钟周期数。这有助于性能分析和调试，但它不是程序计数器（PC）自身的属性，而是处理器在其中运行的系统级时钟周期计数。
 	reg [31:0] reg_pc, reg_next_pc, reg_op1, reg_op2, reg_out;
 	reg [4:0] reg_sh; // Shift Register
 
@@ -190,6 +190,11 @@ module picorv32 #(
 	task empty_statement;
 		// This task is used by the `assert directive in non-formal mode to
 		// avoid empty statement (which are unsupported by plain Verilog syntax).
+		//
+		// In Verilog, a 'task' is a procedural block used for common operations.
+		// It can contain timing control statements (e.g., delays, event waits)
+		// and can execute in zero or more simulation time units. Unlike functions,
+		// tasks do not return a value but can have input, output, and inout arguments.
 		begin end
 	endtask
 
@@ -229,7 +234,6 @@ module picorv32 #(
 `endif
 
 	// Internal PCPI Cores
-
 	wire        pcpi_mul_wr;
 	wire [31:0] pcpi_mul_rd;
 	wire        pcpi_mul_wait;
@@ -240,6 +244,7 @@ module picorv32 #(
 	wire        pcpi_div_wait;
 	wire        pcpi_div_ready;
 
+    // int是integrated的意思
 	reg        pcpi_int_wr;
 	reg [31:0] pcpi_int_rd;
 	reg        pcpi_int_wait;
@@ -2215,7 +2220,7 @@ module picorv32_pcpi_mul #(
 
 	reg [63:0] rs1, rs2, rd, rdx;
 	reg [63:0] next_rs1, next_rs2, this_rs2;
-	reg [63:0] next_rd, next_rdx, next_rdt;
+	reg [63:0] next_rd, next_rdx, next_rdt; // rdt是中间变量，用来存S或者C
 	reg [6:0] mul_counter;
 	reg mul_waiting;
 	reg mul_finish;
@@ -2229,16 +2234,16 @@ module picorv32_pcpi_mul #(
 		next_rs2 = rs2;
 
 		for (i = 0; i < STEPS_AT_ONCE; i=i+1) begin
-			this_rs2 = next_rs1[0] ? next_rs2 : 0;
+			this_rs2 = next_rs1[0] ? next_rs2 : 0; // 根据next_rs1最低位判断要不要乘next_rs2
 			if (CARRY_CHAIN == 0) begin
-				next_rdt = next_rd ^ next_rdx ^ this_rs2;
-				next_rdx = ((next_rd & next_rdx) | (next_rd & this_rs2) | (next_rdx & this_rs2)) << 1;
+				next_rdt = next_rd ^ next_rdx ^ this_rs2; // S = A ^ C ^ B
+				next_rdx = ((next_rd & next_rdx) | (next_rd & this_rs2) | (next_rdx & this_rs2)) << 1; // C
 				next_rd = next_rdt;
 			end else begin
 				next_rdt = 0;
 				for (j = 0; j < 64; j = j + CARRY_CHAIN)
 					{next_rdt[j+CARRY_CHAIN-1], next_rd[j +: CARRY_CHAIN]} =
-							next_rd[j +: CARRY_CHAIN] + next_rdx[j +: CARRY_CHAIN] + this_rs2[j +: CARRY_CHAIN];
+							next_rd[j +: CARRY_CHAIN] + next_rdx[j +: CARRY_CHAIN] + this_rs2[j +: CARRY_CHAIN]; // {C,S} = A+B+C
 				next_rdx = next_rdt << 1;
 			end
 			next_rs1 = next_rs1 >> 1;
@@ -2250,8 +2255,7 @@ module picorv32_pcpi_mul #(
 		mul_finish <= 0;
 		if (!resetn) begin
 			mul_waiting <= 1;
-		end else
-		if (mul_waiting) begin
+		end else if (mul_waiting) begin
 			if (instr_rs1_signed)
 				rs1 <= $signed(pcpi_rs1);
 			else
@@ -2281,6 +2285,7 @@ module picorv32_pcpi_mul #(
 	end
 
 	always @(posedge clk) begin
+        // 这种写法更简便
 		pcpi_wr <= 0;
 		pcpi_ready <= 0;
 		if (mul_finish && resetn) begin
@@ -2292,8 +2297,8 @@ module picorv32_pcpi_mul #(
 endmodule
 
 module picorv32_pcpi_fast_mul #(
-	parameter EXTRA_MUL_FFS = 0,
-	parameter EXTRA_INSN_FFS = 0,
+	parameter EXTRA_MUL_FFS = 0, // Flip-Flops(FFS)
+	parameter EXTRA_INSN_FFS = 0, 
 	parameter MUL_CLKGATE = 0
 ) (
 	input clk, resetn,
@@ -2307,7 +2312,10 @@ module picorv32_pcpi_fast_mul #(
 	output            pcpi_wait,
 	output            pcpi_ready
 );
-	reg instr_mul, instr_mulh, instr_mulhsu, instr_mulhu;
+	reg instr_mul, // 两个32位有符号数相乘，返回64位结果的低32位
+	    instr_mulh, // 两个32位有符号数相乘，返回64位结果的高32位
+	    instr_mulhsu, // 一个32位有符号数与一个32位无符号数相乘，返回64位结果的高32位
+	    instr_mulhu; // 两个32位无符号数相乘，返回64位结果的高32位
 	wire instr_any_mul = |{instr_mul, instr_mulh, instr_mulhsu, instr_mulhu};
 	wire instr_any_mulh = |{instr_mulh, instr_mulhsu, instr_mulhu};
 	wire instr_rs1_signed = |{instr_mulh, instr_mulhsu};
@@ -2408,10 +2416,10 @@ module picorv32_pcpi_div (
 	reg instr_div, instr_divu, instr_rem, instr_remu;
 	wire instr_any_div_rem = |{instr_div, instr_divu, instr_rem, instr_remu};
 
-	reg pcpi_wait_q;
+	reg pcpi_wait_q; // Holds the value of pcpi_wait from the previous cycle.
 	wire start = pcpi_wait && !pcpi_wait_q;
 
-	always @(posedge clk) begin
+	always @(posedge clk) begin // Decode
 		instr_div <= 0;
 		instr_divu <= 0;
 		instr_rem <= 0;
@@ -2419,10 +2427,10 @@ module picorv32_pcpi_div (
 
 		if (resetn && pcpi_valid && !pcpi_ready && pcpi_insn[6:0] == 7'b0110011 && pcpi_insn[31:25] == 7'b0000001) begin
 			case (pcpi_insn[14:12])
-				3'b100: instr_div <= 1;
-				3'b101: instr_divu <= 1;
-				3'b110: instr_rem <= 1;
-				3'b111: instr_remu <= 1;
+				3'b100: instr_div <= 1;  
+				3'b101: instr_divu <= 1; 
+				3'b110: instr_rem <= 1;  
+				3'b111: instr_remu <= 1; 
 			endcase
 		end
 
@@ -2447,17 +2455,21 @@ module picorv32_pcpi_div (
 		end else
 		if (start) begin
 			running <= 1;
-			dividend <= (instr_div || instr_rem) && pcpi_rs1[31] ? -pcpi_rs1 : pcpi_rs1;
+
+			dividend <= (instr_div || instr_rem) && pcpi_rs1[31] ? -pcpi_rs1 : pcpi_rs1; // 判断符号位 -> 加符号
 			divisor <= ((instr_div || instr_rem) && pcpi_rs2[31] ? -pcpi_rs2 : pcpi_rs2) << 31;
-			outsign <= (instr_div && (pcpi_rs1[31] != pcpi_rs2[31]) && |pcpi_rs2) || (instr_rem && pcpi_rs1[31]);
+			
+			outsign <= (instr_div && (pcpi_rs1[31] != pcpi_rs2[31]) && |pcpi_rs2) || (instr_rem && pcpi_rs1[31]); // 中间有判断除数是否为0的逻辑
+			
 			quotient <= 0;
 			quotient_msk <= 1 << 31;
 		end else
 		if (!quotient_msk && running) begin
 			running <= 0;
-			pcpi_ready <= 1;
-			pcpi_wr <= 1;
-`ifdef RISCV_FORMAL_ALTOPS
+			pcpi_ready <= 1; // Signal completion to the CPU.
+			pcpi_wr <= 1;      // Signal that the result on pcpi_rd is valid.
+
+`ifdef RISCV_FORMAL_ALTOPS // Verification
 			case (1)
 				instr_div:  pcpi_rd <= (pcpi_rs1 - pcpi_rs2) ^ 32'h7f8529ec;
 				instr_divu: pcpi_rd <= (pcpi_rs1 - pcpi_rs2) ^ 32'h10e8fd70;
@@ -2470,11 +2482,13 @@ module picorv32_pcpi_div (
 			else
 				pcpi_rd <= outsign ? -dividend : dividend;
 `endif
-		end else begin
+		end else 
+		begin
 			if (divisor <= dividend) begin
 				dividend <= dividend - divisor;
 				quotient <= quotient | quotient_msk;
 			end
+			
 			divisor <= divisor >> 1;
 `ifdef RISCV_FORMAL_ALTOPS
 			quotient_msk <= quotient_msk >> 5;
@@ -2521,8 +2535,7 @@ module picorv32_axi #(
 	output trap,
 
 	// AXI4-lite master memory interface
-
-	output        mem_axi_awvalid,
+	output        mem_axi_awvalid, // a代码Address
 	input         mem_axi_awready,
 	output [31:0] mem_axi_awaddr,
 	output [ 2:0] mem_axi_awprot,
@@ -2532,7 +2545,7 @@ module picorv32_axi #(
 	output [31:0] mem_axi_wdata,
 	output [ 3:0] mem_axi_wstrb,
 
-	input         mem_axi_bvalid,
+	input         mem_axi_bvalid, // Response
 	output        mem_axi_bready,
 
 	output        mem_axi_arvalid,
@@ -2704,14 +2717,15 @@ endmodule
  * picorv32_axi_adapter
  ***************************************************************/
 
-module picorv32_axi_adapter (
+module picorv32_axi_adapter ( // AXI适配器
 	input clk, resetn,
 
+	// AXI stands for Advanced eXtensible Interface
 	// AXI4-lite master memory interface
 
 	output        mem_axi_awvalid,
 	input         mem_axi_awready,
-	output [31:0] mem_axi_awaddr,
+	output [31:0] mem_axi_awaddr, // Write Address Channel Address
 	output [ 2:0] mem_axi_awprot,
 
 	output        mem_axi_wvalid,
@@ -2719,7 +2733,7 @@ module picorv32_axi_adapter (
 	output [31:0] mem_axi_wdata,
 	output [ 3:0] mem_axi_wstrb,
 
-	input         mem_axi_bvalid,
+	input         mem_axi_bvalid, // Write Response Valid
 	output        mem_axi_bready,
 
 	output        mem_axi_arvalid,
@@ -2732,43 +2746,43 @@ module picorv32_axi_adapter (
 	input  [31:0] mem_axi_rdata,
 
 	// Native PicoRV32 memory interface
-
 	input         mem_valid,
 	input         mem_instr,
 	output        mem_ready,
-	input  [31:0] mem_addr,
-	input  [31:0] mem_wdata,
-	input  [ 3:0] mem_wstrb,
-	output [31:0] mem_rdata
+
+    input  [31:0] mem_addr,
+    input  [31:0] mem_wdata,
+    input  [ 3:0] mem_wstrb, // Memory write strobe (byte enable): controls which bytes of mem_wdata are written to memory.
+    output [31:0] mem_rdata
 );
-	reg ack_awvalid;
-	reg ack_arvalid;
-	reg ack_wvalid;
-	reg xfer_done;
+reg ack_awvalid; // Acknowledges that the AXI write address (AW) channel has been accepted by the AXI slave.
+reg ack_arvalid;
+reg ack_wvalid;
+reg xfer_done;
 
-	assign mem_axi_awvalid = mem_valid && |mem_wstrb && !ack_awvalid;
-	assign mem_axi_awaddr = mem_addr;
-	assign mem_axi_awprot = 0;
+assign mem_axi_awvalid = mem_valid && |mem_wstrb && !ack_awvalid;
+assign mem_axi_awaddr = mem_addr;
+assign mem_axi_awprot = 0; // 3'b000: Unprivileged, Non-secure, Data access
 
-	assign mem_axi_arvalid = mem_valid && !mem_wstrb && !ack_arvalid;
-	assign mem_axi_araddr = mem_addr;
-	assign mem_axi_arprot = mem_instr ? 3'b100 : 3'b000;
+assign mem_axi_arvalid = mem_valid && !mem_wstrb && !ack_arvalid;
+assign mem_axi_araddr = mem_addr;
+assign mem_axi_arprot = mem_instr ? 3'b100 : 3'b000;
 
-	assign mem_axi_wvalid = mem_valid && |mem_wstrb && !ack_wvalid;
-	assign mem_axi_wdata = mem_wdata;
-	assign mem_axi_wstrb = mem_wstrb;
+assign mem_axi_wvalid = mem_valid && |mem_wstrb && !ack_wvalid;
+assign mem_axi_wdata = mem_wdata;
+assign mem_axi_wstrb = mem_wstrb;
 
-	assign mem_ready = mem_axi_bvalid || mem_axi_rvalid;
-	assign mem_axi_bready = mem_valid && |mem_wstrb;
-	assign mem_axi_rready = mem_valid && !mem_wstrb;
-	assign mem_rdata = mem_axi_rdata;
+assign mem_ready = mem_axi_bvalid || mem_axi_rvalid;
+assign mem_axi_bready = mem_valid && |mem_wstrb;
+assign mem_axi_rready = mem_valid && !mem_wstrb;
+assign mem_rdata = mem_axi_rdata;
 
-	always @(posedge clk) begin
-		if (!resetn) begin
-			ack_awvalid <= 0;
-		end else begin
-			xfer_done <= mem_valid && mem_ready;
-			if (mem_axi_awready && mem_axi_awvalid)
+always @(posedge clk) begin
+    if (!resetn) begin
+        ack_awvalid <= 0;
+    end else begin
+        xfer_done <= mem_valid && mem_ready;
+        if (mem_axi_awready && mem_axi_awvalid)
 				ack_awvalid <= 1;
 			if (mem_axi_arready && mem_axi_arvalid)
 				ack_arvalid <= 1;
